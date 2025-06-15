@@ -1,8 +1,10 @@
 [General]
-display_time = 10         ; seconds on screen
+display_time = 10        ; seconds on screen
 frame_interval = 30      ; base interval, seconds
 jitter = 5               ; +/- seconds
 fat_bits = 2             ; pixel size
 update_mode = DU         ; DU or A2
 window_multiplier= 2     ; so 8×2=16px windows
-cluster_size = 512      ; redraw cloud size
+cluster_size = 512       ; redraw cloud size
+chunk_pause = 0.05       ; pause between clusters
+brightness = 1.2         ; what it says on the tin
