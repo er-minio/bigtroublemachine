@@ -1,5 +1,5 @@
 # ignore generated frames
-active-frame/
+#active-frame/
 # ignore Python cache
 __pycache__/
 *.pyc
