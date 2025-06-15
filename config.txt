@@ -1,0 +1,7 @@
+[General]
+display_time = 3         ; seconds on screen
+frame_interval = 30      ; base interval, seconds
+jitter = 5               ; +/- seconds
+fat_bits = 2             ; pixel size
+update_mode = DU         ; DU or A2
+window_multiplier= 1     ; so 8×2=16px windows
