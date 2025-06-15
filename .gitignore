@@ -1,5 +1,9 @@
 # ignore generated frames
 #active-frame/
+#movie file
+big-trouble-little-china.mp4
 # ignore Python cache
 __pycache__/
 *.pyc
+#random
+128

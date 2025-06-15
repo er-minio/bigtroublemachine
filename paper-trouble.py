@@ -60,8 +60,7 @@ def main():
     # load config
     display_time, frame_interval, jitter, fat_bits, update_mode, window_multiplier = read_config()
     mode_val = constants.DisplayModes.DU if update_mode=='DU' else constants.DisplayModes.A2
-    print(f"➡️ fat_bits = {fat_bits}, window_multiplier = {window_multiplier}")
-    print(f"🕑 frame persistance time = {display_time} seconds")
+    print(f"➡️ fat_bits={fat_bits}, window_multiplier={window_multiplier}, mode={update_mode}")
 
     # open video
     cap = cv2.VideoCapture(VIDEO_PATH)
@@ -77,7 +76,7 @@ def main():
     t = 0.0
     while True:
         # sample frame
-        t_next = t + frame_interval + random.uniform(-jitter,jitter)
+        t_next = t + frame_interval + random.uniform(-jitter, jitter)
         frame, t = sample_frame(cap, t_next, duration)
 
         # save and load
@@ -104,14 +103,14 @@ def main():
 
         # set mode
         display.draw_full(mode_val)
-        print(f"🟢 Draw mode = {update_mode}")
+        print(f"🟢 {update_mode}")
 
         # dither
         sw, sh = nw//fat_bits, nh//fat_bits
         small = imr.resize((sw,sh), Image.Resampling.LANCZOS)
         print(f"➡️ image size = {sw}×{sh}")
         dsmall = atkinson_dither(small)
-        gray  = np.array(small)
+        gray   = np.array(small)
 
         # build full dither
         dfull = dsmall.resize((nw,nh), Image.Resampling.NEAREST)
@@ -120,27 +119,45 @@ def main():
         full.save(os.path.join(ACTIVE_DIR,'dithered.png'))
         print("🟢 Dither saved")
 
-        # reveal
-        coords = [(x,y,gray[y,x]) for y in range(sh) for x in range(sw) if dsmall.getpixel((x,y))==0]
+        # reveal (raw buffer slicing)
+        coords = [(x,y,gray[y,x]) 
+                  for y in range(sh) for x in range(sw) 
+                  if dsmall.getpixel((x,y))==0]
         coords.sort(key=lambda e:e[2])
         rnd = []
         for v,grp in groupby(coords,key=lambda e:e[2]):
             b=list(grp); random.shuffle(b); rnd+=b
 
-        # batch windows
-        win = fat_bits*window_multiplier
-        seen=set(); wins=[]
+        # window batching
+        win = fat_bits * window_multiplier
+        seen = set(); wins = []
         for xs,ys,_ in rnd:
             wx,wy = xs//window_multiplier, ys//window_multiplier
             if (wx,wy) not in seen:
                 seen.add((wx,wy)); wins.append((wx,wy))
 
-        # update each
+        # grab a memoryview of the full image buffer
+        full_bytes = full.tobytes()
+        row_stride = disp_w
+
+        # update each window
         for wx,wy in wins:
-            px = x0_off + wx*win; py = y0_off + wy*win
+            px = x0_off + wx*win
+            py = y0_off + wy*win
+
+            # paste for the frame_buf
             blk = full.crop((px,py,px+win,py+win))
             display.frame_buf.paste(blk,(px,py))
-            display.update(blk.tobytes(), (px,py), (win,win), mode_val)
+
+            # slice out the raw win×win bytes
+            mv = memoryview(full_bytes)
+            buf = bytearray(win*win)
+            for r in range(win):
+                start = (py + r)*row_stride + px
+                buf[r*win:(r+1)*win] = mv[start:start+win]
+
+            # send the update
+            display.update(buf, (px,py), (win,win), mode_val)
 
         print("✅ Done")
         time.sleep(display_time)
