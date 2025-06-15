@@ -16,12 +16,13 @@ def read_config():
     cfg = configparser.ConfigParser(inline_comment_prefixes=('#',';'))
     cfg.read(CONFIG_FILE)
     return (
-        cfg.getint('General','display_time',     fallback=300),
-        cfg.getint('General','frame_interval',   fallback=30),
-        cfg.getint('General','jitter',           fallback=5),
-        cfg.getint('General','fat_bits',         fallback=1),
-        cfg.get('General','update_mode',         fallback='A2').upper(),
-        cfg.getint('General','window_multiplier',fallback=2),
+        cfg.getint('General','display_time',      fallback=300),
+        cfg.getint('General','frame_interval',    fallback=30),
+        cfg.getint('General','jitter',            fallback=5),
+        cfg.getint('General','fat_bits',          fallback=1),
+        cfg.get('General','update_mode',          fallback='A2').upper(),
+        cfg.getint('General','window_multiplier', fallback=2),
+        cfg.getint('General','cluster_size',      fallback=2024),
     )
 
 def ensure_active_dir():
@@ -58,14 +59,14 @@ def sample_frame(cap, t, duration):
 
 def main():
     # load config
-    display_time, frame_interval, jitter, fat_bits, update_mode, window_multiplier = read_config()
+    display_time, frame_interval, jitter, fat_bits, update_mode, window_multiplier, cluster_size = read_config()
     mode_val = constants.DisplayModes.DU if update_mode=='DU' else constants.DisplayModes.A2
-    print(f"➡️ fat_bits={fat_bits}, window_multiplier={window_multiplier}, mode={update_mode}")
+    print(f"➡️ fat_bits={fat_bits}, window_multiplier={window_multiplier}, cluster_size={cluster_size}, mode={update_mode}")
 
     # open video
     cap = cv2.VideoCapture(VIDEO_PATH)
     if not cap.isOpened(): raise IOError("Cannot open video")
-    fps = cap.get(cv2.CAP_PROP_FPS)
+    fps      = cap.get(cv2.CAP_PROP_FPS)
     duration = cap.get(cv2.CAP_PROP_FRAME_COUNT)/fps
 
     # init display
@@ -76,7 +77,7 @@ def main():
     t = 0.0
     while True:
         # sample frame
-        t_next = t + frame_interval + random.uniform(-jitter, jitter)
+        t_next = t + frame_interval + random.uniform(-jitter,jitter)
         frame, t = sample_frame(cap, t_next, duration)
 
         # save and load
@@ -91,7 +92,8 @@ def main():
         nw = int(iw*scale) - (int(iw*scale)%fat_bits)
         nh = int(ih*scale) - (int(ih*scale)%fat_bits)
         imr = im.resize((nw,nh), Image.Resampling.LANCZOS)
-        x0_off = (disp_w-nw)//2; y0_off = (disp_h-nh)//2
+        x0_off = (disp_w-nw)//2
+        y0_off = (disp_h-nh)//2
 
         # draw bars
         bg = Image.new('L',(disp_w,disp_h),255)
@@ -112,52 +114,33 @@ def main():
         dsmall = atkinson_dither(small)
         gray   = np.array(small)
 
-        # build full dither
+        # build full dither & save
         dfull = dsmall.resize((nw,nh), Image.Resampling.NEAREST)
         full  = Image.new('L',(disp_w,disp_h),0)
         full.paste(dfull,(x0_off,y0_off))
         full.save(os.path.join(ACTIVE_DIR,'dithered.png'))
         print("🟢 Dither saved")
 
-        # reveal (raw buffer slicing)
-        coords = [(x,y,gray[y,x]) 
-                  for y in range(sh) for x in range(sw) 
+        # reveal (clustered)
+        coords = [(x,y,gray[y,x])
+                  for y in range(sh) for x in range(sw)
                   if dsmall.getpixel((x,y))==0]
         coords.sort(key=lambda e:e[2])
         rnd = []
         for v,grp in groupby(coords,key=lambda e:e[2]):
             b=list(grp); random.shuffle(b); rnd+=b
 
-        # window batching
-        win = fat_bits * window_multiplier
-        seen = set(); wins = []
-        for xs,ys,_ in rnd:
-            wx,wy = xs//window_multiplier, ys//window_multiplier
-            if (wx,wy) not in seen:
-                seen.add((wx,wy)); wins.append((wx,wy))
-
-        # grab a memoryview of the full image buffer
-        full_bytes = full.tobytes()
-        row_stride = disp_w
-
-        # update each window
-        for wx,wy in wins:
-            px = x0_off + wx*win
-            py = y0_off + wy*win
-
-            # paste for the frame_buf
-            blk = full.crop((px,py,px+win,py+win))
-            display.frame_buf.paste(blk,(px,py))
-
-            # slice out the raw win×win bytes
-            mv = memoryview(full_bytes)
-            buf = bytearray(win*win)
-            for r in range(win):
-                start = (py + r)*row_stride + px
-                buf[r*win:(r+1)*win] = mv[start:start+win]
-
-            # send the update
-            display.update(buf, (px,py), (win,win), mode_val)
+        # clustered updates
+        for i in range(0, len(rnd), cluster_size):
+            chunk = rnd[i:i+cluster_size]
+            for xs, ys, _ in chunk:
+                x0 = x0_off + xs * fat_bits
+                y0 = y0_off + ys * fat_bits
+                blk = full.crop((x0, y0, x0 + fat_bits, y0 + fat_bits))
+                display.frame_buf.paste(blk, (x0, y0))
+            # one DU partial refresh for the whole frame
+            display.draw_partial(1)
+            time.sleep(0.05)
 
         print("✅ Done")
         time.sleep(display_time)
