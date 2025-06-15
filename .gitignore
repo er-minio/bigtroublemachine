@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 #random
 128
+#macos crap
+.DS_Store
+._*
