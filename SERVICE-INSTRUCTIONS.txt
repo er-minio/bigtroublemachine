@@ -1,0 +1,82 @@
+BIG TROUBLE MACHINE — running paper-trouble.py as a service
+============================================================
+
+The script runs on a Raspberry Pi as a systemd service so it survives
+crashes and power cuts (restarts automatically, and starts on boot).
+
+Pi access
+---------
+  Host:     3pi.local   (192.168.1.248)
+  User:     pi
+  Connect:  ssh pi@3pi.local
+
+Project location on the Pi
+--------------------------
+  /home/pi/bigtroublemachine
+  Entry point: paper-trouble.py
+  Python:      /usr/bin/python3 (system Python, no virtualenv)
+
+
+The service
+===========
+Unit file: /etc/systemd/system/bigtroublemachine.service
+
+  [Unit]
+  Description=Big Trouble Machine - e-paper display loop
+  After=multi-user.target
+  StartLimitIntervalSec=0
+
+  [Service]
+  Type=simple
+  User=pi
+  Group=pi
+  WorkingDirectory=/home/pi/bigtroublemachine
+  Environment=PYTHONUNBUFFERED=1
+  ExecStart=/usr/bin/python3 /home/pi/bigtroublemachine/paper-trouble.py
+  Restart=always
+  RestartSec=10
+  StandardOutput=journal
+  StandardError=journal
+
+  [Install]
+  WantedBy=multi-user.target
+
+What the settings do:
+  - User=pi              runs as the pi user (already in spi/gpio/i2c groups,
+                         so no root needed for the e-paper display)
+  - Restart=always       restarts 10s after any crash
+  - RestartSec=10        the 10s wait between restarts
+  - StartLimitIntervalSec=0  disables systemd's "give up after 5 rapid
+                         restarts" limit, so it always keeps retrying
+  - PYTHONUNBUFFERED=1   so the script's output streams live to the journal
+  - enabled              starts automatically on boot (covers power cuts)
+
+
+Handy commands
+==============
+Run these on the Pi, or prefix any of them with: ssh pi@3pi.local
+
+  sudo systemctl status bigtroublemachine        # current state
+  journalctl -u bigtroublemachine -f             # follow live logs
+  sudo systemctl restart bigtroublemachine       # restart
+  sudo systemctl stop bigtroublemachine          # stop (stays stopped until started)
+  sudo systemctl start bigtroublemachine         # start
+  sudo systemctl enable bigtroublemachine        # start on boot
+  sudo systemctl disable bigtroublemachine       # don't start on boot
+
+
+Important notes
+===============
+1. If you ever run the script manually again (e.g. python3 paper-trouble.py
+   over SSH), STOP the service first:
+       sudo systemctl stop bigtroublemachine
+   Otherwise two processes fight over the e-paper SPI bus and it misbehaves.
+
+2. To re-create the service from scratch, save the unit file above to
+   /etc/systemd/system/bigtroublemachine.service then run:
+       sudo systemctl daemon-reload
+       sudo systemctl enable bigtroublemachine
+       sudo systemctl start bigtroublemachine
+
+
+Set up: 2026-06-19
